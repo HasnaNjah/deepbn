@@ -1,0 +1,113 @@
+#-------------------------------------------------------------------------
+# Import the used libraries
+
+library(infotheo)
+library(cluster)
+library(vegan)
+library(igraph)
+
+#-------------------------------------------------------------------------
+# Define the Symmetric Uncertainty and the Conditional Symmetric Uncertainty 
+
+symmUnc <- function(x,y){
+  return((2*mutinformation(x,y))/(entropy(x)+entropy(y)))
+}
+
+condSymmUnc <- function(x,y,z){
+  return((2*condinformation(x, y, z, method="emp"))/(condentropy(x, z, method="emp")+condentropy(y, z, method="emp")))
+}
+
+#-------------------------------------------------------------------------
+# dissimilarity matrix 
+
+# 0 => same features 
+# 1 => totally different features
+
+# dd is the dataset where rows=samples and columns=features
+# s is string that specifies the distance measure 
+# "sup" for using the conditional symmetric uncertainty
+# "unpus" for using the symmetric uncertainty 
+
+dep_mat_su <- function (dd, s=c("sup","unsup")){
+  res <- matrix(0, ncol = (ncol(dd)-1), nrow = (ncol(dd)-1))
+  for (i in 2:(ncol(dd)-1)){
+    for (j in 1:(i-1)){
+      if (s == "sup"){
+        res [i,j] <- condSymmUnc(dd[,i],dd[,j])
+      }else{
+        if (s == "unsup"){
+          res [i,j] <- symmUnc(dd[,i],dd[,j])
+        }else{
+          print ("the context is either sup or unsup")
+          break;
+        }
+      }
+      res [j,i] <- res[i,j]
+      #print(i+j)
+    }
+  }
+  colnames(res) <- colnames(dd)[1:(length(colnames(dd))-1)]
+  rownames(res) <- colnames(res)
+  return(res)
+}
+
+#-------------------------------------------------------------------------
+# dependency-based graphical partitionning 
+#-------------------------------------------------------------------------
+
+cgp <- function (dm,k){
+  cluster <- threshold(dm)
+  edgesC <- which(cluster == 1,arr.ind = TRUE)
+  g <- graph(edgesC,directed = F)
+  partition <- max_cliques(g)
+  x <- length(partition)
+  while (x>k){
+    aux <- matrix(0,ncol=x,nrow=x)
+    for (i in 2:x){
+      for (j in 1:(x-1)){
+        aux[i,j] <- length(which(partition[[i]] %in% partition[[j]]))/i
+        aux[j,i] <- length(which(partition[[j]] %in% partition[[i]]))/j
+      }
+    }
+    m <- which(aux == max(aux),arr.ind = TRUE)
+    partition [[m[1,1]]] <- unique(c(partition [[m[1,1]]],partition [[m[1,2]]]))
+    partition [[m[1,2]]] <- NULL
+    x <- x-1
+  }
+  
+  return (partition)
+}
+
+threshold <- function (dist){
+  # alpha <- mean(as.matrix(dist)) - quantile(as.matrix(dist))[3] + quantile(as.matrix(dist))[2]
+  alpha <-  quantile(as.matrix(dist))[3] 
+  res <- dist
+  for (i in 2:nrow(dist)){
+    for (j in 1:i){
+      if (dist[i,j]<alpha){
+        res[i,j] <- 1
+        res[j,i] <- 1
+      }else{
+        res[i,j] <- 0
+        res[j,i] <- 0
+      }
+    }
+  }
+  return(res)
+}
+
+#-------------------------------------------------------------------------
+# density-based features clustering 
+# Isometric Feature Mapping Ordination 
+#-------------------------------------------------------------------------
+
+dbfc <- function (dm){
+  cluster <- isomap(dist(dm), k = 5, ndim=1,fragmentedOK =T)
+  g <- graph_from_edgelist(cluster$net,directed = F)
+  partition <- cluster_edge_betweenness(g)
+  res <- list()
+  for (i in 1:length(partition)){
+    res[[i]] <- partition[[i]]
+  }
+  return (res)
+}
